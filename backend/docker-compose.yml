@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: chotu-postgres
+    environment:
+      POSTGRES_USER: chotu
+      POSTGRES_PASSWORD: chotu
+      POSTGRES_DB: chotu
+    ports:
+      - "5433:5432"
+    volumes:
+      - chotu_pgdata:/var/lib/postgresql/data
+      - ./scripts/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chotu -d chotu"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: chotu-redis
+    ports:
+      - "6380:6379"
+
+  api:
+    build: .
+    image: chotu-gyani-backend:latest
+    container_name: chotu-api
+    environment:
+      APP_ENV: dev
+      DATABASE_URL: postgresql+asyncpg://chotu:chotu@postgres:5432/chotu
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-change-me-dev-secret-change-me-dev-secret}
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      # Compose reads GROQ_API_KEY etc. from backend/.env (variable substitution).
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      STT_PROVIDER: ${STT_PROVIDER:-groq}
+      TTS_PROVIDER: ${TTS_PROVIDER:-groq}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_LLM_MODEL: ${GROQ_LLM_MODEL:-openai/gpt-oss-120b}
+      GROQ_STT_MODEL: ${GROQ_STT_MODEL:-whisper-large-v3}
+      GROQ_TTS_MODEL: ${GROQ_TTS_MODEL:-canopylabs/orpheus-v1-english}
+      GROQ_TTS_VOICE: ${GROQ_TTS_VOICE:-troy}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      ENABLE_WORKERS: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+volumes:
+  chotu_pgdata:
