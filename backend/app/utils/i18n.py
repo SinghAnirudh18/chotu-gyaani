@@ -70,6 +70,11 @@ T: dict[str, dict[str, str]] = {
         "hi": "कौन सा बिल नंबर?",
         "hi-Latn": "Kaun sa invoice number?",
     },
+    "preview_create_customer": {
+        "en": "I will create customer '{customer}'{phone}. Please confirm.",
+        "hi": "मैं नया ग्राहक '{customer}'{phone} जोड़ूँगा। पुष्टि करें।",
+        "hi-Latn": "Main naya customer '{customer}'{phone} add karunga. Confirm karein.",
+    },
     "preview_schedule_reminder": {
         "en": "I will schedule a {channel} reminder for {customer} on {when}{invoice}. Please confirm.",
         "hi": "मैं {customer} के लिए {when} को {channel} रिमाइंडर सेट करूँगा{invoice}। कृपया पुष्टि करें।",
@@ -159,6 +164,11 @@ T: dict[str, dict[str, str]] = {
         "en": "{customer} owes {amount} across {count} open invoice(s).",
         "hi": "{customer} का {amount} बाकी है ({count} खुले बिल)।",
         "hi-Latn": "{customer} ka {amount} baaki hai ({count} open invoice).",
+    },
+    "no_open_invoices_for_payment": {
+        "en": "{customer} has no open bills with pending balance to record a payment.",
+        "hi": "{customer} का कोई बकाया बिल नहीं मिला जिसमें भुगतान दर्ज किया जा सके।",
+        "hi-Latn": "{customer} ka koi open bill nahi mila jisme payment darj ki ja sake.",
     },
     "balance_zero": {
         "en": "{customer} has no outstanding balance.",

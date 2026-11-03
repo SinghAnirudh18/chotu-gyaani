@@ -72,11 +72,66 @@ class GroqTTS:
 class GnaniTTS:
     name = "gnani"
 
+    def __init__(self) -> None:
+        s = get_settings()
+        self.api_key = s.gnani_api_key
+        self.base_url = (s.gnani_base_url or "https://api.vachana.ai").rstrip("/")
+        self.configured = bool(self.api_key)
+
     async def synthesize(self, text: str, language: str, voice: str | None) -> AudioResult:
-        raise ProviderNotConfigured("Gnani TTS adapter is not configured", details={"provider": "gnani"})
+        if not self.configured:
+            raise ProviderNotConfigured("Gnani TTS adapter is not configured", details={"provider": "gnani"})
+
+        import httpx
+        from app.core.exceptions import ProviderUnavailable
+        from app.utils.i18n import normalize_lang
+
+        norm = normalize_lang(language)
+        lang_code = "en-IN" if norm == "en" else "hi-IN"
+        chosen_voice = voice or ("Shivani" if lang_code == "hi-IN" else "Devansh")
+
+        headers = {
+            "X-API-Key-ID": self.api_key,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "text": text,
+            "voice": chosen_voice,
+            "model": "timbre-v3.0",
+            "language": lang_code,
+            "speed": 1.0,
+            "audio_config": {
+                "sample_rate": 24000,
+                "num_channels": 1,
+                "sample_width": 2,
+                "encoding": "linear_pcm",
+                "container": "wav",
+            },
+        }
+
+        url = f"{self.base_url}/api/v1/tts/inference"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            if resp.status_code != 200:
+                raise ProviderUnavailable(f"Gnani TTS error ({resp.status_code}): {resp.text}", details={"provider": "gnani"})
+
+            audio_bytes = resp.content
+            duration = wav_duration(audio_bytes)
+            return AudioResult(
+                audio=audio_bytes,
+                mime_type="audio/wav",
+                duration_seconds=round(duration, 2),
+                provider=self.name,
+            )
 
     async def health(self) -> dict:
-        return {"provider": self.name, "status": "not_configured", "mock": False}
+        return {
+            "provider": self.name,
+            "status": "configured" if self.configured else "not_configured",
+            "mock": False,
+            "model": "timbre-v3.0",
+            "voices": ["Shivani", "Devansh", "Kalpana", "Shubham", "Avinash"],
+        }
 
 
 def get_tts() -> TextToSpeechProvider:

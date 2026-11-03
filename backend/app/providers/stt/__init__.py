@@ -95,14 +95,73 @@ class GnaniSTT:
 
     def __init__(self) -> None:
         s = get_settings()
-        self.configured = bool(s.gnani_api_key and s.gnani_base_url)
+        self.api_key = s.gnani_api_key
+        self.base_url = (s.gnani_base_url or "https://api.vachana.ai").rstrip("/")
+        self.configured = bool(self.api_key)
 
     async def transcribe(self, audio: bytes, language_hint: str | None) -> Transcript:
-        # Adapter intentionally not implemented without verified official API docs.
-        raise ProviderNotConfigured("Gnani STT adapter is not configured", details={"provider": "gnani"})
+        if not self.configured:
+            raise ProviderNotConfigured("Gnani STT adapter is not configured", details={"provider": "gnani"})
+
+        import httpx
+        from app.core.exceptions import ProviderUnavailable
+
+        fmt = sniff(audio) or "wav"
+        if fmt not in ("wav", "flac", "mp3", "aac", "m4a", "ogg"):
+            import subprocess
+            try:
+                proc = subprocess.run(
+                    ["ffmpeg", "-y", "-i", "pipe:0", "-ar", "16000", "-ac", "1", "-f", "wav", "pipe:1"],
+                    input=audio,
+                    capture_output=True,
+                    check=True,
+                )
+                if proc.stdout:
+                    audio = proc.stdout
+                    fmt = "wav"
+            except Exception:
+                pass
+
+        ext = fmt
+        mime = "audio/wav" if fmt == "wav" else f"audio/{ext}"
+
+        lang_code = "hi-IN"
+        if language_hint:
+            n = normalize_lang(language_hint)
+            if n == "en":
+                lang_code = "en-IN"
+            elif n in ("hi", "hi-Latn"):
+                lang_code = "hi-IN"
+
+        headers = {"X-API-Key-ID": self.api_key}
+        files = {"audio_file": (f"audio.{ext}", audio, mime)}
+        data = {"language_code": lang_code, "model": "prisma-v3.0"}
+
+        url = f"{self.base_url}/stt/v3"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, headers=headers, data=data, files=files)
+            if resp.status_code != 200:
+                raise ProviderUnavailable(f"Gnani STT error ({resp.status_code}): {resp.text}", details={"provider": "gnani"})
+            
+            res_json = resp.json()
+            transcript_text = res_json.get("transcript", "").strip()
+            detected = res_json.get("detected_language_code", "hi-IN")
+            lang = "hi" if "hi" in detected.lower() else "en"
+
+            return Transcript(
+                text=transcript_text,
+                language=lang,
+                confidence=0.95 if transcript_text else 0.0,
+                provider=self.name,
+            )
 
     async def health(self) -> dict:
-        return {"provider": self.name, "status": "not_configured", "mock": False}
+        return {
+            "provider": self.name,
+            "status": "configured" if self.configured else "not_configured",
+            "mock": False,
+            "model": "prisma-v3.0",
+        }
 
 
 def get_stt() -> SpeechToTextProvider:

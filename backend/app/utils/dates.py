@@ -74,6 +74,17 @@ def resolve_relative_date(relative: str, today: date) -> date:
         if unit.startswith("week"):
             return today + timedelta(weeks=n)
         return add_months(today, n)
+    m = re.fullmatch(r"(?:day|tarik|tareekh)_(\d{1,2})", r)
+    if m:
+        target_day = int(m.group(1))
+        max_days = calendar.monthrange(today.year, today.month)[1]
+        if 1 <= target_day <= max_days:
+            if target_day >= today.day:
+                return date(today.year, today.month, target_day)
+            else:
+                next_m = add_months(today, 1)
+                max_next = calendar.monthrange(next_m.year, next_m.month)[1]
+                return date(next_m.year, next_m.month, min(target_day, max_next))
     raise ValidationFailed("Unsupported relative date", code="invalid_date", details={"relative": relative})
 
 
@@ -86,6 +97,8 @@ def resolve_date(spec: dict, tz: str, now: datetime | None = None) -> date:
             raise ValidationFailed("Invalid date", code="invalid_date", details={"date": spec["date"]}) from e
     if spec.get("relative"):
         return resolve_relative_date(spec["relative"], today)
+    if spec.get("time"):
+        return today
     raise ValidationFailed("Date is required", code="missing_date")
 
 

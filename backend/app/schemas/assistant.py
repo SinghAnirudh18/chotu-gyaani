@@ -9,7 +9,7 @@ from app.schemas.common import ORMModel
 IntentType = Literal[
     "search_customers", "get_customer_balance", "get_invoice_details", "list_overdue_invoices",
     "list_customer_reminders", "get_dashboard_summary", "schedule_reminder",
-    "record_payment_commitment", "record_payment", "clarify", "smalltalk", "unsupported",
+    "record_payment_commitment", "record_payment", "create_customer", "clarify", "smalltalk", "unsupported",
 ]
 
 

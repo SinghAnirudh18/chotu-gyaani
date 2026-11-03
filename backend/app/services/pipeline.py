@@ -20,7 +20,7 @@ from app.core.logging import log_event
 from app.db.models import Agent, Conversation, Customer, Message, PendingAction
 from app.providers.llm import IntentContext, LLMProvider, get_llm
 from app.repositories import ledger as repo
-from app.schemas.assistant import Intent, IntentEntities
+from app.schemas.assistant import DateSpec, Intent, IntentEntities
 from app.services import action_service
 from app.tools.registry import REGISTRY, WRITE_TOOLS, ToolContext, effective_tools
 from app.utils.dates import resolve_date, resolve_datetime, resolve_future_date
@@ -100,6 +100,26 @@ def _options(candidates: list[dict]) -> str:
     return "\n".join(lines)
 
 
+
+def _fill_date_from_text(d_spec: DateSpec | None, text: str) -> DateSpec | None:
+    import re
+    res = d_spec.model_copy() if d_spec else DateSpec()
+    if not (res.date or res.relative):
+        m_day = re.search(r'\b(\d{1,2})\s*(?:tarik|tareekh|th|st|nd|rd)\b', text, re.IGNORECASE)
+        if m_day:
+            res.relative = f"day_{m_day.group(1)}"
+        elif re.search(r'\bkal\b', text, re.IGNORECASE):
+            res.relative = "tomorrow"
+        elif re.search(r'\bparso\b', text, re.IGNORECASE):
+            res.relative = "day_after_tomorrow"
+        elif re.search(r'\baaj\b', text, re.IGNORECASE):
+            res.relative = "today"
+        elif res.time:
+            res.relative = "today"
+    if res.date or res.relative or res.time:
+        return res
+    return None
+
 class Pipeline:
     def __init__(self, ctx: Ctx, conversation: Conversation | None, agent: Agent | None, dry_run: bool) -> None:
         self.ctx = ctx
@@ -153,6 +173,11 @@ class Pipeline:
             intent = Intent.model_validate(raw.model_dump() if hasattr(raw, "model_dump") else raw)
         except ValidationError:
             intent = Intent(type="unsupported")
+        patched_date = _fill_date_from_text(intent.entities.date, text)
+        if patched_date:
+            intent.entities.date = patched_date
+            if patched_date.date or patched_date.relative:
+                intent.missing_fields = [f for f in intent.missing_fields if f != "date"]
         log_event(logger, "intent_extracted", provider=llm.name, intent_type=intent.type,
                   provider_latency_ms=round((time.perf_counter() - started) * 1000))
         return intent
@@ -191,8 +216,10 @@ class Pipeline:
             e = fresh.entities
             merged = intent.entities.model_copy()
             filled = False
-            if slot == "date" and e.date:
-                merged.date, filled = e.date, True
+            if slot == "date":
+                d = _fill_date_from_text(e.date, text)
+                if d:
+                    merged.date, filled = d, True
             elif slot == "amount" and e.amount_phrase:
                 merged.amount_phrase, filled = e.amount_phrase, True
             elif slot == "customer_name" and (e.customer_name or e.customer_phone or e.query):
@@ -277,7 +304,8 @@ class Pipeline:
         if not required:
             return None, None
         if not items:
-            return None, Outcome(t("balance_zero", lang, customer=customer.name), lang,
+            msg_key = "no_open_invoices_for_payment" if (required and intent.type == "record_payment") else "balance_zero"
+            return None, Outcome(t(msg_key, lang, customer=customer.name), lang,
                                  intent=intent.model_dump(mode="json"), tool=intent.type)
         options = [{"id": str(i.id), "name": customer.name, "number": i.number,
                     "balance_display": i.balance_display} for i in items[:5]]
@@ -309,6 +337,17 @@ class Pipeline:
             if itype in ("list_overdue_invoices", "get_dashboard_summary"):
                 inp = tool.input_schema.model_validate({})
                 return await self._run_read(tool, tctx, inp, idump, lang)
+
+            if itype == "create_customer":
+                name = e.customer_name or e.query
+                if not name:
+                    return self._ask(lang, "ask_customer", "customer_name", intent, resolved)
+                payload = {
+                    "name": name,
+                    "phone": e.customer_phone,
+                    "notes": None,
+                }
+                return await self._propose(tool, tctx, payload, idump, lang)
 
             if itype == "get_invoice_details":
                 if not e.invoice_number:
@@ -346,7 +385,7 @@ class Pipeline:
 
             if itype == "schedule_reminder":
                 assert customer is not None
-                if not e.date:
+                if not (e.date and (e.date.date or e.date.relative)):
                     return self._ask(lang, "ask_date", "date", intent, resolved)
                 when = resolve_datetime(e.date.model_dump(), tz, tctx.now)
                 invoice_id, out = await self._resolve_invoice_for(intent, lang, resolved, customer, required=False)
@@ -359,7 +398,7 @@ class Pipeline:
 
             if itype == "record_payment_commitment":
                 assert customer is not None
-                if not e.date:
+                if not (e.date and (e.date.date or e.date.relative)):
                     return self._ask(lang, "ask_date", "date", intent, resolved)
                 promised_on = resolve_future_date(e.date.model_dump(), tz, tctx.now)
                 amount = None
@@ -386,7 +425,8 @@ class Pipeline:
                     return out
                 if invoice_id is None:
                     return self._ask(lang, "ask_invoice", "invoice_number", intent, resolved)
-                paid_on: date = resolve_date(e.date.model_dump(), tz, tctx.now) if e.date else tctx.today
+                has_date = bool(e.date and (e.date.date or e.date.relative))
+                paid_on: date = resolve_date(e.date.model_dump(), tz, tctx.now) if has_date else tctx.today
                 payload = {"invoice_id": invoice_id, "amount_paise": amount, "paid_on": paid_on, "method": "cash"}
                 return await self._propose(tool, tctx, payload, idump, lang)
         except AppError as err:

@@ -380,10 +380,58 @@ class RecordPayment(Tool):
                 "summary": f"Payment of {format_inr(inp.amount_paise)} on {inv.number}"}
 
 
+
+
+class CreateCustomerIn(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    phone: str | None = Field(default=None, max_length=32)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class CreateCustomer(Tool):
+    name = "create_customer"
+    description = "Create a new customer profile with name and optional phone or notes (requires confirmation)."
+    input_schema = CreateCustomerIn
+    kind = "write"
+    requires_confirmation = True
+    audit_event = "customer.create"
+    propose_perm = Perm.CUSTOMERS_WRITE
+    confirm_perm = Perm.CUSTOMERS_WRITE
+
+    async def preview(self, ctx: ToolContext, inp: CreateCustomerIn) -> dict:  # type: ignore[override]
+        phone_txt = f" ({inp.phone})" if inp.phone else ""
+        return {
+            "text": t("preview_create_customer", ctx.language, customer=inp.name, phone=phone_txt),
+            "fields": {
+                "customer": inp.name,
+                "phone": inp.phone,
+                "notes": inp.notes,
+            }
+        }
+
+    async def execute(self, ctx: ToolContext, inp: CreateCustomerIn, action_id: uuid.UUID) -> dict:  # type: ignore[override]
+        from app.utils.text import normalize_name
+        from app.utils.phone import try_normalize_phone
+        phone_e164 = try_normalize_phone(inp.phone) if inp.phone else None
+        c = Customer(
+            business_id=ctx.business_id,
+            name=inp.name.strip(),
+            name_normalized=normalize_name(inp.name),
+            phone_e164=phone_e164,
+            notes=inp.notes,
+        )
+        ctx.db.add(c)
+        await ctx.db.flush()
+        return {
+            "entity_type": "customer",
+            "entity_id": str(c.id),
+            "summary": f"Created customer {c.name}",
+        }
+
 REGISTRY: dict[str, Tool] = {tool.name: tool for tool in (
     SearchCustomers(), GetCustomerBalance(), GetInvoiceDetails(), ListOverdueInvoices(),
     ListCustomerReminders(), GetDashboardSummary(), ScheduleReminder(), RecordPaymentCommitment(),
-    RecordPayment(),
+    RecordPayment(), CreateCustomer(),
 )}
 ALLOWLIST: frozenset[str] = frozenset(REGISTRY)
 WRITE_TOOLS: frozenset[str] = frozenset(n for n, tl in REGISTRY.items() if tl.kind == "write")
