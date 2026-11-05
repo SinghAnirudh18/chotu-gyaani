@@ -70,7 +70,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     task = None
     if settings.enable_workers and settings.app_env != "test":
         task = asyncio.create_task(reminder_worker.loop(get_sessionmaker(), stop))
+
+    # Start Telegram bot (no-op if token not set)
+    from app.integrations.telegram_bot import start_telegram_bot, stop_telegram_bot
+    await start_telegram_bot()
+
     yield
+
+    # Shutdown
+    await stop_telegram_bot()
     stop.set()
     if task:
         await task

@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     gnani_api_key: str = ""
     gnani_base_url: str = ""
 
+    # Telegram bot integration
+    telegram_bot_token: str = ""
+
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/integrations/google-sheets/callback"
