@@ -106,8 +106,16 @@ def resolve_datetime(spec: dict, tz: str, now: datetime | None = None, *, allow_
     """Return an aware UTC datetime. Rejects past moments unless allow_past."""
     now = now or utcnow()
     d = resolve_date(spec, tz, now)
-    t = _parse_time(spec.get("time")) or DEFAULT_TIME
-    local = datetime.combine(d, t, tzinfo=ZoneInfo(tz))
+    user_time = _parse_time(spec.get("time"))
+    if user_time is not None:
+        local = datetime.combine(d, user_time, tzinfo=ZoneInfo(tz))
+    else:
+        local_now = now.astimezone(ZoneInfo(tz))
+        if d == local_now.date() and local_now.time() >= DEFAULT_TIME:
+            # 10:00 AM has already passed today; default to 1 hour from now
+            local = (local_now + timedelta(hours=1)).replace(second=0, microsecond=0)
+        else:
+            local = datetime.combine(d, DEFAULT_TIME, tzinfo=ZoneInfo(tz))
     result = local.astimezone(UTC)
     if not allow_past and result <= now:
         raise ValidationFailed("That time is in the past", code="date_in_past",
